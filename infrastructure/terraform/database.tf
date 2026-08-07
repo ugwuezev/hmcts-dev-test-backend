@@ -30,6 +30,20 @@ resource "azurerm_postgresql_flexible_server" "case_management" {
   }
 }
 
+# Flexible Server names the throttle parameter connection_throttle.enable,
+# not connection_throttling as on the retired Single Server.
+resource "azurerm_postgresql_flexible_server_configuration" "audit" {
+  for_each = {
+    "log_connections"            = "on"
+    "log_checkpoints"            = "on"
+    "connection_throttle.enable" = "on"
+  }
+
+  name      = each.key
+  value     = each.value
+  server_id = azurerm_postgresql_flexible_server.case_management.id
+}
+
 resource "azurerm_postgresql_flexible_server_database" "application" {
   name      = var.database_name
   server_id = azurerm_postgresql_flexible_server.case_management.id

@@ -8,6 +8,7 @@ resource "azurerm_key_vault" "case_management" {
 
   rbac_authorization_enabled = true
   purge_protection_enabled   = var.delete_protection_enabled
+  soft_delete_retention_days = var.key_vault_soft_delete_retention_days
 
   lifecycle {
     precondition {
@@ -32,6 +33,7 @@ resource "azurerm_role_assignment" "kv_secrets_user" {
 resource "azurerm_key_vault_secret" "db_user" {
   name         = "db-user-name"
   value        = var.postgres_admin_username
+  content_type = "PostgreSQL administrator login"
   key_vault_id = azurerm_key_vault.case_management.id
   tags         = var.tags
 
@@ -41,6 +43,7 @@ resource "azurerm_key_vault_secret" "db_user" {
 resource "azurerm_key_vault_secret" "db_password" {
   name         = "db-password"
   value        = random_password.postgres.result
+  content_type = "PostgreSQL administrator password"
   key_vault_id = azurerm_key_vault.case_management.id
   tags         = var.tags
 

@@ -7,7 +7,7 @@ Spring Boot service for the HMCTS case management system, wired to PostgreSQL an
 | Application config | `src/main/resources/application.yaml` |
 | Container image | `Dockerfile`, `.dockerignore` |
 | Local stack | `docker-compose.yml`, `.env.example` |
-| Pipeline | `.github/workflows/`, `.github/actions/terraform` |
+| Pipeline | `.github/workflows/`, `.github/actions/terraform`, `.trivyignore.yaml` |
 | Infrastructure | `infrastructure/terraform/` |
 
 Docker is the only requirement to run the service. JDK 21 and Terraform 1.15 are needed only to run the build or the infrastructure checks directly.
@@ -20,6 +20,7 @@ Docker is the only requirement to run the service. JDK 21 and Terraform 1.15 are
   - [Feature branch vs master](#feature-branch-vs-master)
   - [Image tagging](#image-tagging)
   - [Gates](#gates)
+  - [Accepted findings](#accepted-findings)
   - [Repository secrets](#repository-secrets)
 - [Infrastructure](#infrastructure)
   - [Why Container Apps](#why-container-apps)
@@ -82,7 +83,7 @@ The image is multi-stage, runs as a non-root user, and sizes the heap from the c
 | Job | Defined in | What it does |
 | --- | --- | --- |
 | **Build and test** | `_build-test.yml` | Checkstyle, then `./gradlew build` for unit and integration tests. Reports uploaded as artefacts. |
-| **Terraform checks** | `_terraform-checks.yml` | `fmt -check -recursive`, `init -backend=false`, `validate`, plus a Trivy config scan. |
+| **Terraform checks** | `_terraform-checks.yml` | `fmt -check -recursive`, `init -backend=false`, `validate`, plus a Trivy misconfiguration scan. |
 | **Image build and scan** | `_image.yml` | Builds the image and scans it with Trivy. Publishes on master. |
 | **CI gate** | `ci.yml` | Single aggregate check for branch protection. |
 
@@ -131,12 +132,27 @@ A rollback has to name the exact artefact that was running before, which a movin
 | Checkstyle violation | `_build-test.yml` |
 | Failing unit or integration test | `_build-test.yml` |
 | Unformatted HCL, or Terraform that does not validate | `_terraform-checks.yml` |
+| CRITICAL infrastructure misconfiguration | `_terraform-checks.yml` |
 | CRITICAL CVE with a fix available | `_image.yml` |
 | Image does not build | `_image.yml` |
 
 Branch protection on `master` should require the **CI gate** check, a pull request with one approving review, branches up to date before merging, and no force pushes.
 
-CRITICAL blocks, HIGH warns with a count and a pointer to the Security tab. A hard block on HIGH means a base image CVE with no available fix stops all delivery, including the security fixes that need to ship; `ignore-unfixed` is on for the same reason. Findings from MEDIUM upwards go to the Security tab either way.
+One severity policy covers both scanners: CRITICAL blocks, HIGH warns with a count and a pointer to the Security tab, MEDIUM and above is uploaded for triage. A hard block on HIGH means a base image CVE with no available fix stops all delivery, including the security fixes that need to ship; `ignore-unfixed` is on for the same reason.
+
+`limit-severities-for-sarif` is set on every SARIF step. It defaults to false, which uploads every severity no matter what `severity` says, so without it the Security tab fills with LOW findings the policy never asked for.
+
+### Accepted findings
+
+`.trivyignore.yaml` holds the exceptions. Each one carries the reason and a date it is revisited; when that date passes the entry stops suppressing and the check fails, so an exception cannot quietly become permanent.
+
+| Finding | Why it is accepted |
+| --- | --- |
+| `AVD-AZU-0013` Key Vault network ACL | Container Apps is not a Key Vault trusted service and has no stable outbound address while the environment has no VNet integration, so a deny-by-default ACL has nothing to allowlist. RBAC and a managed identity carry the control. |
+| `AVD-AZU-0022` public database access | Same root cause. The server accepts Azure services only and requires TLS. |
+| `AVD-AZU-0017` secret expiry date | An expiry on a credential with no automated rotation is a scheduled outage. |
+
+The first two close together by moving to a workload profile environment with private endpoints, which is listed under *With more time*.
 
 **Blocking a release.** A deployment can only name an image tag that exists in the registry, and only master and version tags push there, so nothing that failed CI is deployable. `deploy.yml` plans before it applies, the apply job sits behind the environment's required reviewers, and the smoke test against `/health/readiness` fails the run if the new revision starts but cannot reach the database.
 
@@ -280,7 +296,7 @@ In the pipeline the composite action passes these values as `-backend-config` fl
 **Trade-offs**
 
 - **Scope.** The configuration covers the resource group, database, compute and Key Vault, plus the registry and workspace those depend on. Private networking, diagnostic settings and alerting are the next additions for a live service.
-- **Public endpoints on the database and vault.** A Container Apps environment without VNet integration has no stable outbound address, and Container Apps is not a Key Vault trusted service, so there is nothing specific to allowlist. RBAC, TLS enforcement and least-privilege roles carry the security in the meantime.
+- **Public endpoints on the database and vault.** A Container Apps environment without VNet integration has no stable outbound address, and Container Apps is not a Key Vault trusted service, so there is nothing specific to allowlist. RBAC, TLS enforcement and least-privilege roles carry the security in the meantime. This is the accepted finding behind `AVD-AZU-0013` and `AVD-AZU-0022`.
 - **Password authentication.** Entra authentication would remove the stored credential entirely, but the datasource expects a username and password.
 - **HIGH CVEs warn rather than block.** The alternative stops delivery on findings the team cannot fix.
 - **Ubuntu base rather than Alpine.** Around 90 MB of image size traded for reliable multi-architecture builds.
@@ -290,6 +306,7 @@ In the pipeline the composite action passes these values as `-backend-config` fl
 
 - Private networking: a VNet-integrated environment, PostgreSQL on private access, private endpoints for the vault and a Premium registry.
 - Diagnostic settings and alerting on database availability, replica restarts and storage headroom.
+- Automated rotation of the database credential, which is what makes an expiry date on the Key Vault secret safe to set.
 - Flyway or Liquibase for schema migrations, run before the new revision takes traffic.
 - Front Door or Application Gateway with WAF in front of the ingress.
 - Canary rollout using Container Apps traffic weights rather than the current all-at-once revision switch.

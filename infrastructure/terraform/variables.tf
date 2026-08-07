@@ -102,6 +102,12 @@ variable "key_vault_sku" {
   default     = "standard"
 }
 
+variable "key_vault_soft_delete_retention_days" {
+  description = "Days a deleted vault stays recoverable, between 7 and 90."
+  type        = number
+  default     = 90
+}
+
 variable "registry_sku" {
   description = "Container registry SKU. Expected: Basic, Standard or Premium."
   type        = string

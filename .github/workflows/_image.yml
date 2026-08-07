@@ -102,6 +102,8 @@ jobs:
             echo "No fixable HIGH severity vulnerabilities."
           fi
 
+      # limit-severities-for-sarif defaults to false, which sends every
+      # severity to the Security tab regardless of the filter.
       - name: Findings to the Security tab
         if: always()
         uses: aquasecurity/trivy-action@v0.36.0
@@ -110,6 +112,7 @@ jobs:
           format: sarif
           output: trivy-image.sarif
           severity: MEDIUM,HIGH,CRITICAL
+          limit-severities-for-sarif: true
           ignore-unfixed: true
           exit-code: "0"
 

@@ -19,6 +19,8 @@ postgres_backup_retention_days        = 7
 postgres_geo_redundant_backup_enabled = false
 postgres_high_availability_enabled    = false
 
+key_vault_soft_delete_retention_days = 7
+
 registry_sku = "Basic"
 
 container_cpu    = 0.5
