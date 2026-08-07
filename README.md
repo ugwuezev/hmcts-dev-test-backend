@@ -106,11 +106,14 @@ CI runs on every push to every branch, and every branch runs the same checks. Wh
 | Gradle cache | read-only | writes |
 | Superseded runs | cancelled | allowed to finish |
 
-Publishing is decided by the ref, not by the event:
+Publishing is decided by the ref, not by the event, and only once the registry and the identity that reaches it are both configured:
 
 ```yaml
-PUBLISH: ${{ github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v') }}
+PUBLISH: ${{ (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+             && secrets.ACR_LOGIN_SERVER != '' && secrets.AZURE_CLIENT_ID != '' }}
 ```
+
+Half a configuration skips with a notice naming what is missing, rather than failing the build. A fork with no Azure account behind it still gets a green pipeline.
 
 A feature branch therefore gets full feedback, including the container scan, without any cloud credential being available to unreviewed code. The image is built and loaded locally so the scan runs against the exact artefact master would later push. Deployment is a separate workflow, so the permissions that can change production are not attached to every CI run.
 
@@ -164,6 +167,8 @@ The first two close together by moving to a workload profile environment with pr
 | `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` | OIDC federated login |
 | `ACR_NAME`, `ACR_LOGIN_SERVER` | Registry push target |
 | `TF_STATE_RESOURCE_GROUP`, `TF_STATE_STORAGE_ACCOUNT` | Remote state backend |
+
+None of these is needed for CI to pass. Build, test, Checkstyle, the Terraform checks and the container scan all run without an Azure account; the secrets only gate publishing and deployment.
 
 ---
 
