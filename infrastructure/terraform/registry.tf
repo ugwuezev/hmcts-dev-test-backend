@@ -1,13 +1,12 @@
-resource "azurerm_container_registry" "case_management" {
-  name                = local.registry_name
-  resource_group_name = azurerm_resource_group.case_management.name
-  location            = azurerm_resource_group.case_management.location
-  sku                 = var.registry_sku
-  tags                = var.tags
+# Shared across services and environments, so it is read rather than owned.
+# One registry keeps a sha- tag the same artefact from dev through to prd.
+data "azurerm_container_registry" "shared" {
+  name                = var.registry_name
+  resource_group_name = var.registry_resource_group_name
 }
 
 resource "azurerm_role_assignment" "acr_pull" {
-  scope                = azurerm_container_registry.case_management.id
+  scope                = data.azurerm_container_registry.shared.id
   role_definition_name = "AcrPull"
   principal_id         = azurerm_user_assigned_identity.api.principal_id
 }

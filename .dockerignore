@@ -10,7 +10,6 @@ bin/
 infrastructure/
 *.md
 LICENSE
-*.docx
 
 .env
 .env.*

@@ -4,9 +4,8 @@ locals {
   # <organization>-<resource abbreviation>-<service>-<environment>-<location>
   name = lower(replace(replace("${var.organization}-%s-${var.service.formattedName}-${local.suffix}", "_", "-"), " ", "-"))
 
-  registry_name   = replace(format(local.name, "cr"), "-", "")
   container_name  = lower(replace(replace(var.service.name, "_", "-"), " ", "-"))
-  container_image = "${azurerm_container_registry.case_management.login_server}/${var.image_name}:${var.image_tag}"
+  container_image = "${data.azurerm_container_registry.shared.login_server}/${var.image_name}:${var.image_tag}"
 
   container_secrets = {
     "db-user-name" = azurerm_key_vault_secret.db_user.versionless_id

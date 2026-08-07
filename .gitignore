@@ -24,13 +24,9 @@ bin/main/application.yaml
 applicationinsights-agent-*.jar
 *.log
 
-### Test brief, not part of the solution ###
-Technical Test.docx
-
 ### Local environment ###
 # Holds local database credentials. Never commit it.
 .env
-.env.local
 
 ### Terraform ###
 **/.terraform/*

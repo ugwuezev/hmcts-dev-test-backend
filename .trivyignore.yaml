@@ -23,6 +23,26 @@ misconfigurations:
       private access.
     expired_at: 2027-02-28
 
+  - id: AVD-AZU-0021
+    paths:
+      - "infrastructure/terraform/database.tf"
+    statement: >-
+      The check reads azurerm_postgresql_configuration with the name
+      connection_throttling, which belongs to the retired Single Server.
+      Flexible Server calls the parameter connection_throttle.enable and it is
+      set to on in azurerm_postgresql_flexible_server_configuration.audit.
+    expired_at: 2027-02-28
+
+  - id: AVD-AZU-0026
+    paths:
+      - "infrastructure/terraform/database.tf"
+    statement: >-
+      The check reads ssl_minimal_tls_version_enforced on
+      azurerm_postgresql_server, which does not exist on Flexible Server.
+      Flexible Server defaults require_secure_transport to on and
+      ssl_min_protocol_version to TLSv1.2, so TLS is already enforced.
+    expired_at: 2027-02-28
+
   - id: AVD-AZU-0017
     paths:
       - "infrastructure/terraform/keyvault.tf"

@@ -14,7 +14,7 @@ variable "service" {
 }
 
 variable "environment" {
-  description = "Deployment environment. Expected: dev, tst, stg or prd."
+  description = "Deployment environment. One tfvars file per environment in envs/."
   type        = string
   default     = "prd"
 }
@@ -108,10 +108,16 @@ variable "key_vault_soft_delete_retention_days" {
   default     = 90
 }
 
-variable "registry_sku" {
-  description = "Container registry SKU. Expected: Basic, Standard or Premium."
+variable "registry_name" {
+  description = "Shared container registry the image is pulled from. Created outside this configuration."
   type        = string
-  default     = "Standard"
+  default     = "hmctscrshareduks"
+}
+
+variable "registry_resource_group_name" {
+  description = "Resource group holding the shared container registry."
+  type        = string
+  default     = "hmcts-rg-shared-uks"
 }
 
 variable "image_name" {

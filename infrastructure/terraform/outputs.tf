@@ -6,12 +6,9 @@ output "resource_group" {
   }
 }
 
-output "registry" {
-  description = "Container registry the pipeline pushes images to."
-  value = {
-    name         = azurerm_container_registry.case_management.name
-    login_server = azurerm_container_registry.case_management.login_server
-  }
+output "image" {
+  description = "Image the current revision runs."
+  value       = local.container_image
 }
 
 output "keyvault" {

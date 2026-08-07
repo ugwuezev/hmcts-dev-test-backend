@@ -26,7 +26,7 @@ resource "azurerm_container_app" "api" {
   }
 
   registry {
-    server   = azurerm_container_registry.case_management.login_server
+    server   = data.azurerm_container_registry.shared.login_server
     identity = azurerm_user_assigned_identity.api.id
   }
 

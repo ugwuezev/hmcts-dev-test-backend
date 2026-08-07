@@ -14,7 +14,7 @@ on:
         required: true
         default: prd
         type: choice
-        options: [dev, tst, stg, prd]
+        options: [dev, prd]
   push:
     tags: ["v*.*.*"]
 

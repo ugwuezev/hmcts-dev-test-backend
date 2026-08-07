@@ -18,8 +18,6 @@ postgres_backup_retention_days        = 35
 postgres_geo_redundant_backup_enabled = true
 postgres_high_availability_enabled    = true
 
-registry_sku = "Standard"
-
 container_cpu    = 1.0
 container_memory = "2Gi"
 min_replicas     = 2

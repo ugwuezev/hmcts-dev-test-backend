@@ -9,7 +9,7 @@ on:
         description: "Environment to destroy"
         required: true
         type: choice
-        options: [dev, tst, stg]
+        options: [dev]
       confirm:
         description: "Type the environment name again to confirm"
         required: true
