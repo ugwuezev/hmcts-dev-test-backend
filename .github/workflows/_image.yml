@@ -24,8 +24,11 @@ jobs:
       # The secrets context is not available in a step `if`.
       ACR_NAME: ${{ secrets.ACR_NAME }}
       ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
-      # Only master and version tags publish.
-      PUBLISH: ${{ github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v') }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      # Only master and version tags publish, and only once both the registry
+      # and the identity that can reach it are configured. Half a configuration
+      # skips rather than failing the build on someone else's setup.
+      PUBLISH: ${{ (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')) && secrets.ACR_LOGIN_SERVER != '' && secrets.AZURE_CLIENT_ID != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -125,11 +128,19 @@ jobs:
         continue-on-error: true
 
       - name: Note when publishing is skipped
-        if: env.PUBLISH == 'true' && env.ACR_LOGIN_SERVER == ''
-        run: echo "::notice::No registry configured, skipping publish."
+        if: env.PUBLISH != 'true'
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/master" ] && [ "${{ startsWith(github.ref, 'refs/tags/v') }}" != "true" ]; then
+            echo "Not the default branch or a version tag, nothing to publish."
+          else
+            missing=""
+            [ -z "$ACR_LOGIN_SERVER" ] && missing="ACR_LOGIN_SERVER"
+            [ -z "$AZURE_CLIENT_ID" ] && missing="${missing:+$missing, }AZURE_CLIENT_ID"
+            echo "::notice::Publishing skipped, not configured: ${missing}."
+          fi
 
       - name: Azure login
-        if: env.PUBLISH == 'true' && env.ACR_LOGIN_SERVER != ''
+        if: env.PUBLISH == 'true'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -137,7 +148,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Push
-        if: env.PUBLISH == 'true' && env.ACR_LOGIN_SERVER != ''
+        if: env.PUBLISH == 'true'
         env:
           REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
           TAGS: ${{ steps.meta.outputs.tags }}
