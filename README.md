@@ -12,6 +12,25 @@ Spring Boot service for the HMCTS case management system, wired to PostgreSQL an
 
 Docker is the only requirement to run the service. JDK 21 and Terraform 1.15 are needed only to run the build or the infrastructure checks directly.
 
+## Contents
+
+- [Running locally with Docker Compose](#running-locally-with-docker-compose)
+  - [Application changes](#application-changes)
+- [CI/CD](#cicd)
+  - [Feature branch vs master](#feature-branch-vs-master)
+  - [Image tagging](#image-tagging)
+  - [Gates](#gates)
+  - [Repository secrets](#repository-secrets)
+- [Infrastructure](#infrastructure)
+  - [Why Container Apps](#why-container-apps)
+  - [Naming and tagging](#naming-and-tagging)
+  - [Environments](#environments)
+  - [How credentials reach the application](#how-credentials-reach-the-application)
+  - [Checking the configuration](#checking-the-configuration)
+  - [Running a deployment](#running-a-deployment)
+  - [Remote state](#remote-state)
+- [Assumptions and trade-offs](#assumptions-and-trade-offs)
+
 ---
 
 ## Running locally with Docker Compose
@@ -73,15 +92,24 @@ The image is multi-stage, runs as a non-root user, and sizes the heap from the c
 
 ### Feature branch vs master
 
-CI runs on every push to every branch. Feature branches build and scan the image but never push it, so no cloud credentials are exposed to unreviewed code. Publishing is gated on the ref:
+CI runs on every push to every branch, and every branch runs the same checks. What changes is what the run is allowed to produce.
+
+| | Feature branch | master and `v*.*.*` tags |
+| --- | --- | --- |
+| Build, test, scan | yes | yes |
+| Azure login | never | OIDC federated login |
+| Image pushed to the registry | no | yes |
+| Tags applied | `sha-<sha>`, branch name | also `master`, `latest`, semver |
+| Gradle cache | read-only | writes |
+| Superseded runs | cancelled | allowed to finish |
+
+Publishing is decided by the ref, not by the event:
 
 ```yaml
 PUBLISH: ${{ github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v') }}
 ```
 
-Master and `v*.*.*` tags log into Azure with OIDC and push to the registry. There are no long-lived Azure credentials in the repository.
-
-Deployment is a separate workflow, so the permissions that can change production are not attached to every CI run.
+A feature branch therefore gets full feedback, including the container scan, without any cloud credential being available to unreviewed code. The image is built and loaded locally so the scan runs against the exact artefact master would later push. Deployment is a separate workflow, so the permissions that can change production are not attached to every CI run.
 
 ### Image tagging
 
@@ -96,9 +124,21 @@ A rollback has to name the exact artefact that was running before, which a movin
 
 ### Gates
 
-CRITICAL blocks the pipeline, HIGH warns. A hard block on HIGH means a base image CVE with no available fix stops all delivery, including the security fixes that need to ship; `ignore-unfixed` is on for the same reason. Findings from MEDIUM upwards go to the Security tab either way.
+**Blocking a merge.** The `ci-gate` job aggregates the result of every other job and fails if any did not succeed, so branch protection needs one required check rather than a list that drifts as jobs are added. It fails on any of:
 
-Branch protection on `master` should require the **CI gate** check, a pull request with one approval, branches up to date, and no force pushes. Required reviewers on the `prd` GitHub environment make the Terraform apply pause for a human.
+| Failure | From |
+| --- | --- |
+| Checkstyle violation | `_build-test.yml` |
+| Failing unit or integration test | `_build-test.yml` |
+| Unformatted HCL, or Terraform that does not validate | `_terraform-checks.yml` |
+| CRITICAL CVE with a fix available | `_image.yml` |
+| Image does not build | `_image.yml` |
+
+Branch protection on `master` should require the **CI gate** check, a pull request with one approving review, branches up to date before merging, and no force pushes.
+
+CRITICAL blocks, HIGH warns with a count and a pointer to the Security tab. A hard block on HIGH means a base image CVE with no available fix stops all delivery, including the security fixes that need to ship; `ignore-unfixed` is on for the same reason. Findings from MEDIUM upwards go to the Security tab either way.
+
+**Blocking a release.** A deployment can only name an image tag that exists in the registry, and only master and version tags push there, so nothing that failed CI is deployable. `deploy.yml` plans before it applies, the apply job sits behind the environment's required reviewers, and the smoke test against `/health/readiness` fails the run if the new revision starts but cannot reach the database.
 
 ### Repository secrets
 
@@ -127,6 +167,24 @@ outputs.tf        grouped outputs for operators and the deploy job
 envs/*.tfvars     per-environment values, selected with -var-file
 ```
 
+### Why Container Apps
+
+Over App Service for Containers, for a stateless HTTP API: request-based autoscaling with a low floor so idle cost tracks usage; revisions and traffic splitting give blue/green and canary with no extra infrastructure; Key Vault secret references and managed-identity registry pulls are first class, so no credential sits in app configuration.
+
+### Naming and tagging
+
+Resources are named `<organization>-<abbreviation>-<service>-<environment>-<location>`:
+
+| Resource | Name |
+| --- | --- |
+| Resource group | `hmcts-rg-cms-prd-uks` |
+| PostgreSQL server | `hmcts-psql-cms-prd-uks` |
+| Container App | `hmcts-ca-cms-prd-uks` |
+| Key Vault | `hmcts-kv-cms-prd-uks` |
+| Container registry | `hmctscrcmsprduks` |
+
+Names use `service.formattedName`, which keeps every name inside its Azure limit; the full `service.name` names the container inside the app. `var.tags` is applied unchanged to every resource.
+
 ### Environments
 
 One configuration, one state file per environment, selected by `-var-file=envs/<env>.tfvars`. `environment` feeds the resource names and the state key, so `dev` and `prd` never collide.
@@ -148,38 +206,6 @@ Production is protected by process rather than by a lifecycle rule: `destroy.yml
 
 Only the Azure infrastructure is environment-aware. Docker Compose is a single local stack driven by `.env`, and the application itself carries no per-environment configuration.
 
-### Running a deployment
-
-1. Merge to `master`. CI builds, scans and pushes the image, and prints the `sha-` tag in the job summary.
-2. **Actions → Deploy → Run workflow.** Choose the environment and paste that tag.
-3. `plan` prints the diff to the job summary. `apply` waits for the environment's required reviewers, then applies and runs a smoke test against `/health/readiness`.
-
-To tear down a lower environment, **Actions → Destroy**, choose it and type the name to confirm.
-
-The same thing locally, with Azure credentials and the backend block uncommented:
-
-```bash
-cd infrastructure/terraform
-terraform init
-terraform plan  -var-file=envs/dev.tfvars -var="image_tag=sha-1a2b3c4"
-terraform apply -var-file=envs/dev.tfvars -var="image_tag=sha-1a2b3c4"
-terraform destroy -var-file=envs/dev.tfvars -var="image_tag=unused"
-```
-
-**Why Container Apps** over App Service for Containers, for a stateless HTTP API: request-based autoscaling with a low floor so idle cost tracks usage; revisions and traffic splitting give blue/green and canary with no extra infrastructure; Key Vault secret references and managed-identity registry pulls are first class, so no credential sits in app configuration.
-
-Resources are named `<organization>-<abbreviation>-<service>-<environment>-<location>`:
-
-| Resource | Name |
-| --- | --- |
-| Resource group | `hmcts-rg-cms-prd-uks` |
-| PostgreSQL server | `hmcts-psql-cms-prd-uks` |
-| Container App | `hmcts-ca-cms-prd-uks` |
-| Key Vault | `hmcts-kv-cms-prd-uks` |
-| Container registry | `hmctscrcmsprduks` |
-
-Resource names use `service.formattedName`, which keeps every name inside its Azure limit; the full `service.name` is used for the container inside the app. `var.tags` is applied unchanged to every resource.
-
 ### How credentials reach the application
 
 Terraform generates the database password with `random_password` and writes it to Key Vault. The same value sets `administrator_password` on the server in that apply, because Terraform cannot read it back out of the vault at the moment it creates the server.
@@ -199,9 +225,29 @@ terraform fmt -check -recursive
 terraform validate
 ```
 
-Neither needs an Azure account, which is why both run in CI on every push. `plan` authenticates against Azure, so it lives in the deploy workflow.
+None of these needs an Azure account, which is why they run in CI on every push. `plan` authenticates against Azure, so it lives in the deploy workflow.
 
-### Deploying it in a real environment
+### Running a deployment
+
+1. Merge to `master`. CI builds, scans and pushes the image, and prints the `sha-` tag in the job summary.
+2. **Actions → Deploy → Run workflow.** Choose the environment and paste that tag.
+3. `resolve` settles the tag and environment, `plan` prints the diff to the job summary, and `apply` waits for the environment's required reviewers before applying and smoke testing `/health/readiness`.
+
+The plan is not uploaded as an artefact, because a saved plan holds every planned attribute in the clear, including the generated password.
+
+To tear down a lower environment, **Actions → Destroy**, choose it and type the name to confirm.
+
+The same thing locally, with Azure credentials and the backend block uncommented:
+
+```bash
+cd infrastructure/terraform
+terraform init
+terraform plan  -var-file=envs/dev.tfvars -var="image_tag=sha-1a2b3c4"
+terraform apply -var-file=envs/dev.tfvars -var="image_tag=sha-1a2b3c4"
+terraform destroy -var-file=envs/dev.tfvars -var="image_tag=unused"
+```
+
+### Remote state
 
 State lives in an Azure Storage account. The block is in `main.tf`, commented out so `terraform validate` runs without credentials:
 
@@ -218,7 +264,7 @@ backend "azurerm" {
 
 `use_azuread_auth` and `use_oidc` make the backend authenticate as the pipeline's federated identity rather than with a storage account key. The storage account is created once, outside this configuration, and should have blob versioning, soft delete and a resource lock. State is sensitive because it holds the generated password in plain text.
 
-`deploy.yml` runs three jobs: `resolve` works out the image tag and environment, `plan` prints the plan to the job summary, and `apply` waits on the GitHub environment's required reviewers before applying and running a smoke test against `/health/readiness`. The composite action passes the backend values as `-backend-config` flags, so one configuration serves several environments by varying the state `key`. The plan is not uploaded as an artefact, because a saved plan holds every planned attribute in the clear, including the generated password.
+In the pipeline the composite action passes these values as `-backend-config` flags, so one configuration serves several environments by varying the state `key`.
 
 ---
 
@@ -247,4 +293,6 @@ backend "azurerm" {
 - Flyway or Liquibase for schema migrations, run before the new revision takes traffic.
 - Front Door or Application Gateway with WAF in front of the ingress.
 - Canary rollout using Container Apps traffic weights rather than the current all-at-once revision switch.
+- `terraform plan` posted as a pull request comment. An HCL diff does not tell a reviewer whether a resource is being updated or replaced.
+- Path filters, so an application-only change does not wait on the Terraform job and vice versa.
 - The SKUs and replica counts are placeholders; real numbers would come from load testing.
