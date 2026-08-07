@@ -1,0 +1,53 @@
+# Accepted findings. Each entry needs a reason and a date it is revisited.
+# An expired entry stops suppressing, so the check fails and forces the review.
+
+misconfigurations:
+  - id: AVD-AZU-0013
+    paths:
+      - "infrastructure/terraform/keyvault.tf"
+    statement: >-
+      Vault network ACLs cannot deny by default while the Container Apps
+      environment has no VNet integration. Container Apps is not a Key Vault
+      trusted service and has no stable outbound address, so there is nothing
+      to allowlist. Access is controlled by RBAC and a managed identity
+      instead. Closed by moving to a workload profile environment with a
+      private endpoint.
+    expired_at: 2027-02-28
+
+  - id: AVD-AZU-0022
+    paths:
+      - "infrastructure/terraform/database.tf"
+    statement: >-
+      Same root cause as AVD-AZU-0013. The server accepts Azure services only,
+      not the public internet, and requires TLS. Closed by the same move to
+      private access.
+    expired_at: 2027-02-28
+
+  - id: AVD-AZU-0021
+    paths:
+      - "infrastructure/terraform/database.tf"
+    statement: >-
+      The check reads azurerm_postgresql_configuration with the name
+      connection_throttling, which belongs to the retired Single Server.
+      Flexible Server calls the parameter connection_throttle.enable and it is
+      set to on in azurerm_postgresql_flexible_server_configuration.audit.
+    expired_at: 2027-02-28
+
+  - id: AVD-AZU-0026
+    paths:
+      - "infrastructure/terraform/database.tf"
+    statement: >-
+      The check reads ssl_minimal_tls_version_enforced on
+      azurerm_postgresql_server, which does not exist on Flexible Server.
+      Flexible Server defaults require_secure_transport to on and
+      ssl_min_protocol_version to TLSv1.2, so TLS is already enforced.
+    expired_at: 2027-02-28
+
+  - id: AVD-AZU-0017
+    paths:
+      - "infrastructure/terraform/keyvault.tf"
+    statement: >-
+      An expiry date on a credential with no automated rotation is a scheduled
+      outage. Set this once rotation exists and can move the new value into
+      both the vault and the server in one step.
+    expired_at: 2027-02-28

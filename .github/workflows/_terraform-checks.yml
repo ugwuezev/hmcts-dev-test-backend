@@ -1,0 +1,89 @@
+name: Terraform checks
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  security-events: write
+
+env:
+  TERRAFORM_DIR: infrastructure/terraform
+
+jobs:
+  checks:
+    name: Terraform checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # No backend, so neither step below needs Azure credentials.
+      - uses: ./.github/actions/terraform
+
+      - name: Format
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform fmt -check -recursive -diff
+
+      - name: Validate
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform validate -no-color
+
+      # Same severity policy as the image scan. Accepted findings and the
+      # reason for each are in .trivyignore.yaml.
+      - name: Scan, CRITICAL blocks
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          trivyignores: .trivyignore.yaml
+          format: table
+          severity: CRITICAL
+          exit-code: "1"
+
+      - name: Scan, HIGH warns
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          trivyignores: .trivyignore.yaml
+          format: json
+          output: trivy-config-high.json
+          severity: HIGH
+          exit-code: "0"
+
+      - name: Report HIGH findings
+        if: always()
+        run: |
+          set -euo pipefail
+          [ -f trivy-config-high.json ] || { echo "No scan output."; exit 0; }
+          count=$(jq '[.Results[]?.Misconfigurations // [] | length] | add // 0' trivy-config-high.json)
+          if [ "$count" -gt 0 ]; then
+            echo "::warning::$count HIGH severity misconfigurations. Not blocking; see the Security tab."
+          else
+            echo "No HIGH severity misconfigurations."
+          fi
+
+      # limit-severities-for-sarif defaults to false, which sends every
+      # severity to the Security tab regardless of the filter above.
+      - name: Findings to the Security tab
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          trivyignores: .trivyignore.yaml
+          format: sarif
+          output: trivy-config.sarif
+          severity: MEDIUM,HIGH,CRITICAL
+          limit-severities-for-sarif: true
+          exit-code: "0"
+
+      - name: Upload results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-iac
+        continue-on-error: true
